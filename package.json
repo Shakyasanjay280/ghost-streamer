@@ -1,0 +1,14 @@
+{
+  "name": "ghost-streamer",
+  "version": "1.0.0",
+  "description": "Telegram High-Speed Streamer",
+  "main": "index.js",
+  "dependencies": {
+    "telegram": "^2.22.2",
+    "express": "^4.18.2",
+    "input": "^1.0.1"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
