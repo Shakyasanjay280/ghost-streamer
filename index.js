@@ -8,34 +8,38 @@ const apiHash = "e1701bd589138de2dc127ceb6922561b";
 const botToken = "8308568349:AAF8uf5CmoGRt0OZy9K2llDkh50ugd31Z0o";
 const stringSession = new StringSession(""); 
 
-// Render को खुश रखने के लिए पोर्ट पहले चालू करें
-const port = process.env.PORT || 3000;
-app.get("/", (req, res) => res.send("Ghost Bot is Online! ✅"));
-app.listen(port, () => console.log(`Server running on ${port}`));
+const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 10 });
 
-const client = new TelegramClient(stringSession, apiId, apiHash, { 
-    connectionRetries: 10,
-    useWSS: true // बेहतर कनेक्शन के लिए
+// CORS और एरर फिक्स के लिए मिडिलवेयर
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Range, Content-Type");
+    res.header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
+    if (req.method === "OPTIONS") return res.sendStatus(200);
+    next();
 });
+
+app.get("/", (req, res) => res.send("Ghost Bot is Online! ✅"));
+
+const port = process.env.PORT || 10000;
+app.listen(port, () => console.log(`Server running on ${port}`));
 
 async function init() {
     try {
-        console.log("Telegram से जुड़ने की कोशिश...");
-        await client.start({
-            botAuthToken: botToken,
-        });
+        await client.start({ botAuthToken: botToken });
         console.log("Telegram Connected Successfully! 🚀");
 
         app.get("/stream/:chatId/:msgId", async (req, res) => {
             try {
                 const { chatId, msgId } = req.params;
-                const messageId = parseInt(msgId);
-                
-                // मैसेज गेट करें
-                const messages = await client.getMessages(chatId, { ids: [messageId] });
+                const messages = await client.getMessages(chatId, { ids: [parseInt(msgId)] });
                 const message = messages[0];
 
-                if (!message || !message.media) return res.status(404).send("फाइल नहीं मिली या चैनल प्राइवेट है।");
+                if (!message || !message.media) {
+                    if (!res.headersSent) return res.status(404).send("File Not Found");
+                    return;
+                }
 
                 const media = message.media.document || message.media.video;
                 const fileSize = media.size;
@@ -45,7 +49,7 @@ async function init() {
                     const parts = range.replace(/bytes=/, "").split("-");
                     const start = parseInt(parts[0], 10);
                     const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-                    
+
                     res.writeHead(206, {
                         "Content-Range": `bytes ${start}-${end}/${fileSize}`,
                         "Accept-Ranges": "bytes",
@@ -57,31 +61,32 @@ async function init() {
                         file: message.media,
                         offset: start,
                         limit: (end - start) + 1,
-                        requestSize: 256 * 1024,
+                        requestSize: 1024 * 1024,
                     });
 
                     for await (const chunk of stream) {
-                        if (!res.writable) break;
                         res.write(chunk);
                     }
                     res.end();
                 } else {
-                    res.writeHead(200, { "Content-Length": fileSize, "Content-Type": "video/mp4" });
+                    res.writeHead(200, {
+                        "Content-Length": fileSize,
+                        "Content-Type": "video/mp4",
+                    });
                     const stream = client.iterDownload({ file: message.media });
                     for await (const chunk of stream) {
-                        if (!res.writable) break;
                         res.write(chunk);
                     }
                     res.end();
                 }
-            } catch (e) {
-                console.error("स्ट्रीमिंग एरर:", e.message);
-                res.status(500).send("Streaming Error");
+            } catch (err) {
+                console.error("Streaming Error:", err);
+                if (!res.headersSent) res.status(500).send("Internal Server Error");
             }
         });
 
-    } catch (err) {
-        console.error("बोट स्टार्ट होने में दिक्कत:", err.message);
+    } catch (error) {
+        console.error("Connection Failed:", error);
     }
 }
 
